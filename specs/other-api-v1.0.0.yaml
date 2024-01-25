@@ -1,0 +1,24 @@
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: Other API
+  description: A sample API to illustrate OpenAPI concepts
+  contact:
+    email: jack.tysoe@konghq.com
+
+servers:
+- url: http://echo-server.apps.svc.cluster.local:8080/v1
+
+tags:
+  - name: list
+
+paths:
+  /v1/echo:
+    get:
+      description: Returns a list of stuff v1        
+      operationId: list
+      tags:
+      - list
+      responses:
+        '200':
+          description: Successful response

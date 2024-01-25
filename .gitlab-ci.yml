@@ -1,0 +1,88 @@
+variables:
+  WORKSPACE_NAME:
+    value: "new-workspace"
+    description: "Workspace to diff/sync to"
+  KONG_ADDRESS:
+    value: "https://..."
+    description: "The Kong 'admin URL' to install to"
+  KONG_TOKEN:
+    value: "kpat_..."
+    description: "The Kong RBAC token that has access to the workspace given above"
+  GITLAB_PAT:
+    value: "glpat_..."
+    description: "GitLab automation token for this repository (or group/org), that has 'Pull Request Comment' permission"
+
+
+stages:
+- diff
+- deploy
+
+diff_api:
+  stage: diff
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script: |
+    export DECK_COMMAND="diff"
+
+    if [ -z "$DECK_COMMAND" ];
+    then
+      echo "!! Must set deck diff or sync !!";
+      exit 1;
+    fi
+
+    echo ""
+    mkdir -p converted/
+    for FILEPATH in ./specs/*.yaml; do
+      export FILENAME="$(basename $FILEPATH)"
+
+      echo "> Converting API spec $FILENAME to deck objects"
+      deck file openapi2kong \
+         --spec "specs/$FILENAME" \
+         --output-file "converted/$FILENAME" \
+         --select-tag="api_$CI_PROJECT_NAME"
+
+      echo ""
+
+      cat converted/$FILENAME
+    done
+    
+    echo "> $DECK_COMMAND against Control Plane"
+    deck --kong-addr=$KONG_ADDRESS --headers="kong-admin-token:$KONG_TOKEN" gateway $DECK_COMMAND --workspace=$WORKSPACE_NAME --select-tag="api_$CI_PROJECT_NAME" ./converted/* > plan.yaml
+
+    echo -e "\`\`\`\n$(cat plan.yaml)\n\`\`\`" > plan-escaped.yaml
+
+    echo "> Updating Merge Request"
+    curl --location --request POST "https://gitlab.jackgpt.co.uk/api/v4/projects/$CI_MERGE_REQUEST_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes" --header "PRIVATE-TOKEN: $GITLAB_PAT" --header "Content-Type: application/json" --data-raw "$(jq -Rs '{ body: . }' plan-escaped.yaml)"
+
+
+deploy_api:
+  stage: deploy
+  only:
+    - main
+  script: |
+    export DECK_COMMAND="sync"
+
+    if [ -z "$DECK_COMMAND" ];
+    then
+      echo "!! Must set deck diff or sync !!";
+      exit 1;
+    fi
+
+    echo ""
+    mkdir -p converted/
+    for FILEPATH in ./specs/*.yaml; do
+      export FILENAME="$(basename $FILEPATH)"
+
+      echo "> Converting API spec $FILENAME to deck objects"
+      deck file openapi2kong \
+         --spec "specs/$FILENAME" \
+         --output-file "converted/$FILENAME" \
+         --select-tag="api_$CI_PROJECT_NAME"
+
+      echo ""
+
+      cat converted/$FILENAME
+    done
+    
+    echo "> $DECK_COMMAND against Control Plane"
+    deck --kong-addr=$KONG_ADDRESS --headers="kong-admin-token:$KONG_TOKEN" gateway $DECK_COMMAND --workspace=$WORKSPACE_NAME --select-tag="api_$CI_PROJECT_NAME" ./converted/*
